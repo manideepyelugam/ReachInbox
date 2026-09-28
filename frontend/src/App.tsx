@@ -1,50 +1,289 @@
-import React from 'react';
-import { Mail, Calendar, Send, ShieldAlert, Cpu } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { GoogleOAuthProvider } from '@react-oauth/google';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { Header } from './components/Header';
+import { LoginView } from './components/LoginView';
+import { ComposeModal } from './components/ComposeModal';
+import { ScheduledTable } from './components/ScheduledTable';
+import { SentTable } from './components/SentTable';
+import { PreviewModal } from './components/PreviewModal';
+import { SlackModal } from './components/SlackModal';
+import { SearchBar } from './components/SearchBar';
+import {
+  getScheduledEmails,
+  getSentEmails,
+  cancelScheduledEmail,
+  searchEmails,
+} from './services/api';
+import { IEmailJob } from './types';
+import {
+  Calendar,
+  Send,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Inbox,
+  AlertCircle,
+} from 'lucide-react';
+
+const GOOGLE_CLIENT_ID =
+  import.meta.env.VITE_GOOGLE_CLIENT_ID ||
+  '108394857291-example.apps.googleusercontent.com';
+
+function Dashboard() {
+  const { user, loading: authLoading } = useAuth();
+
+  const [activeTab, setActiveTab] = useState<'scheduled' | 'sent'>('scheduled');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Data states
+  const [scheduledEmails, setScheduledEmails] = useState<IEmailJob[]>([]);
+  const [sentEmails, setSentEmails] = useState<IEmailJob[]>([]);
+  const [searchResults, setSearchResults] = useState<IEmailJob[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
+  const [searching, setSearching] = useState(false);
+
+  // Modals
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [isSlackOpen, setIsSlackOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<{ isOpen: boolean; url: string; subject: string }>({
+    isOpen: false,
+    url: '',
+    subject: '',
+  });
+
+  // Load emails
+  const loadData = useCallback(async () => {
+    if (!user) return;
+    setLoadingData(true);
+    try {
+      const [scheduledRes, sentRes] = await Promise.all([
+        getScheduledEmails(),
+        getSentEmails(),
+      ]);
+      setScheduledEmails(scheduledRes.emails || []);
+      setSentEmails(sentRes.emails || []);
+    } catch (err) {
+      console.error('Failed to load email tables:', err);
+    } finally {
+      setLoadingData(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      loadData();
+      // Auto-poll every 5 seconds so user sees live transitions without manual refresh
+      const interval = setInterval(loadData, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [user, loadData]);
+
+  // Debounced Elasticsearch query
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await searchEmails(searchQuery.trim());
+        setSearchResults(res.hits || []);
+      } catch (err) {
+        console.error('Search error:', err);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const handleCancelScheduled = async (id: string) => {
+    try {
+      await cancelScheduledEmail(id);
+      loadData();
+    } catch (err) {
+      console.error('Failed to cancel job:', err);
+    }
+  };
+
+  const handleOpenPreview = (url: string, subject: string) => {
+    setPreviewData({
+      isOpen: true,
+      url,
+      subject,
+    });
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-surface-950 flex flex-col items-center justify-center text-slate-400 gap-3">
+        <div className="h-8 w-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs">Authenticating session...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginView />;
+  }
+
+  const isSearchActive = searchQuery.trim().length > 0;
+
+  return (
+    <div className="min-h-screen bg-surface-950 flex flex-col selection:bg-brand-500 selection:text-white">
+      {/* Header */}
+      <Header onOpenSlackModal={() => setIsSlackOpen(true)} />
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col gap-6">
+        {/* Top Control Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+          {/* Tabs */}
+          <div className="flex items-center gap-2 p-1 rounded-xl bg-surface-900 border border-surface-800 self-start sm:self-auto">
+            <button
+              onClick={() => {
+                setActiveTab('scheduled');
+                setSearchQuery('');
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'scheduled' && !isSearchActive
+                  ? 'bg-brand-600 text-white shadow-glow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Calendar className="h-3.5 w-3.5" />
+              <span>Scheduled Emails</span>
+              <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-surface-800/80 text-brand-300 font-mono">
+                {scheduledEmails.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('sent');
+                setSearchQuery('');
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'sent' && !isSearchActive
+                  ? 'bg-brand-600 text-white shadow-glow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Send className="h-3.5 w-3.5" />
+              <span>Sent Emails</span>
+              <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-surface-800/80 text-emerald-300 font-mono">
+                {sentEmails.length}
+              </span>
+            </button>
+          </div>
+
+          {/* Search & Compose Actions */}
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <SearchBar value={searchQuery} onChange={setSearchQuery} />
+
+            <button
+              onClick={loadData}
+              className="p-2.5 rounded-xl bg-surface-900 border border-surface-800 hover:bg-surface-800 text-slate-400 hover:text-white transition-colors"
+              title="Refresh queue"
+            >
+              <RefreshCw className={`h-4 w-4 ${loadingData ? 'animate-spin text-brand-400' : ''}`} />
+            </button>
+
+            <button
+              onClick={() => setIsComposeOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-glow flex items-center gap-2 transition-all flex-shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Compose Email</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Table Container Card */}
+        <div className="border border-surface-800 bg-surface-900/50 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-md flex-1 flex flex-col">
+          {isSearchActive ? (
+            <div>
+              <div className="p-4 border-b border-surface-800 bg-surface-950/40 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 text-slate-300">
+                  <Sparkles className="h-4 w-4 text-indigo-400" />
+                  <span>
+                    Elasticsearch query: <strong className="text-white font-mono">"{searchQuery}"</strong>
+                  </span>
+                </div>
+                <span className="text-slate-400">{searchResults.length} matches found</span>
+              </div>
+
+              {searching ? (
+                <div className="p-12 flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <div className="h-6 w-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-xs">Querying Elasticsearch index...</p>
+                </div>
+              ) : searchResults.length === 0 ? (
+                <div className="p-16 text-center text-slate-400 flex flex-col items-center">
+                  <Inbox className="h-8 w-8 text-slate-500 mb-2" />
+                  <p className="text-sm font-semibold text-white">No results matched your search query</p>
+                  <p className="text-xs text-slate-500 mt-1">Try searching with another keyword or recipient email.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-surface-800">
+                  {/* Reuse SentTable layout for search matches */}
+                  <SentTable
+                    emails={searchResults}
+                    loading={false}
+                    onPreview={handleOpenPreview}
+                  />
+                </div>
+              )}
+            </div>
+          ) : activeTab === 'scheduled' ? (
+            <ScheduledTable
+              emails={scheduledEmails}
+              loading={loadingData && scheduledEmails.length === 0}
+              onCancel={handleCancelScheduled}
+            />
+          ) : (
+            <SentTable
+              emails={sentEmails}
+              loading={loadingData && sentEmails.length === 0}
+              onPreview={handleOpenPreview}
+            />
+          )}
+        </div>
+      </main>
+
+      {/* Modals */}
+      <ComposeModal
+        isOpen={isComposeOpen}
+        onClose={() => setIsComposeOpen(false)}
+        onSuccess={loadData}
+      />
+
+      <PreviewModal
+        isOpen={previewData.isOpen}
+        onClose={() => setPreviewData({ isOpen: false, url: '', subject: '' })}
+        previewUrl={previewData.url}
+        subject={previewData.subject}
+      />
+
+      <SlackModal
+        isOpen={isSlackOpen}
+        onClose={() => setIsSlackOpen(false)}
+      />
+    </div>
+  );
+}
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-surface-950 flex flex-col">
-      {/* Header */}
-      <header className="border-b border-surface-800 bg-surface-900/50 backdrop-blur-md px-6 py-4 flex items-center justify-between sticky top-0 z-30">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-400 flex items-center justify-center text-white shadow-glow">
-            <Mail className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="font-bold text-lg text-white tracking-tight flex items-center gap-2">
-              ReachInbox <span className="text-xs px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-400 font-medium border border-brand-500/30">Scheduler v1.0</span>
-            </h1>
-            <p className="text-xs text-slate-400">High-Throughput Outreach & Job Orchestrator</p>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 flex flex-col items-center justify-center text-center">
-        <div className="max-w-xl p-8 rounded-2xl border border-surface-800 bg-surface-900/40 backdrop-blur-xl shadow-2xl">
-          <div className="inline-flex p-3 rounded-xl bg-brand-500/10 text-brand-400 mb-4 border border-brand-500/20">
-            <Cpu className="h-8 w-8 animate-pulse" />
-          </div>
-          <h2 className="text-2xl font-bold text-white mb-2">ReachInbox Scheduler Initialized</h2>
-          <p className="text-slate-400 text-sm mb-6 leading-relaxed">
-            Persistent BullMQ delayed email queuing, Redis rate limiting, Elasticsearch search indexing, and real-time Slack notifications engine.
-          </p>
-          <div className="grid grid-cols-2 gap-3 text-left text-xs text-slate-300">
-            <div className="p-3 rounded-lg bg-surface-800/50 border border-surface-700/50 flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-brand-400" /> Delayed Scheduling
-            </div>
-            <div className="p-3 rounded-lg bg-surface-800/50 border border-surface-700/50 flex items-center gap-2">
-              <Send className="h-4 w-4 text-emerald-400" /> Ethereal SMTP Engine
-            </div>
-            <div className="p-3 rounded-lg bg-surface-800/50 border border-surface-700/50 flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 text-amber-400" /> Redis Rate Limiter
-            </div>
-            <div className="p-3 rounded-lg bg-surface-800/50 border border-surface-700/50 flex items-center gap-2">
-              <Mail className="h-4 w-4 text-indigo-400" /> Elasticsearch Search
-            </div>
-          </div>
-        </div>
-      </main>
-    </div>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <AuthProvider>
+        <Dashboard />
+      </AuthProvider>
+    </GoogleOAuthProvider>
   );
 }
