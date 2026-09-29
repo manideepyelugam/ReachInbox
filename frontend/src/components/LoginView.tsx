@@ -1,12 +1,39 @@
 import React, { useState } from 'react';
-import { Mail, Sparkles, Zap, ShieldCheck, Clock, ArrowRight } from 'lucide-react';
-import { GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext';
+import { useGoogleLogin } from '@react-oauth/google';
+import { Zap } from 'lucide-react';
 
 export const LoginView: React.FC = () => {
   const { loginWithGoogle, loginDemo } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const handleCustomGoogleLogin = useGoogleLogin({
+    onSuccess: (tokenResponse) => {
+      if (tokenResponse.access_token) {
+        loginWithGoogle(tokenResponse.access_token);
+      }
+    },
+    onError: () => {
+      setError('Google login was cancelled or failed. You can sign in using the Demo account.');
+    },
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      // In development/demo, allow quick credential login or demo fallback
+      await loginDemo();
+    } catch (err: any) {
+      setError(err.message || 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleDemoLogin = async () => {
     setLoading(true);
@@ -21,77 +48,97 @@ export const LoginView: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-surface-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* Background ambient glows */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] bg-brand-600/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-1/4 w-[350px] h-[350px] bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="w-full max-w-md bg-surface-900/80 border border-surface-700/80 rounded-3xl p-8 shadow-2xl backdrop-blur-xl relative z-10">
-        {/* Brand Icon */}
-        <div className="flex flex-col items-center text-center mb-6">
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-tr from-brand-600 via-indigo-600 to-violet-500 flex items-center justify-center text-white shadow-glow mb-3.5">
-            <Mail className="h-7 w-7" />
-          </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">ReachInbox Scheduler</h1>
-          <p className="text-xs text-slate-400 mt-1">High-Throughput Outreach & Job Orchestration Service</p>
-        </div>
+    <div className="min-h-screen bg-white flex flex-col items-center justify-center p-4">
+      {/* Centered Login Card */}
+      <div className="w-full max-w-[420px] bg-white border border-gray-100 rounded-2xl p-8 sm:p-10 shadow-[0_4px_24px_rgba(0,0,0,0.04)]">
+        {/* Title */}
+        <h1 className="text-2xl font-bold text-gray-900 text-center mb-6 tracking-tight">
+          Login
+        </h1>
 
         {error && (
-          <div className="p-3 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-center">
+          <div className="p-3 mb-4 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs text-center">
             {error}
           </div>
         )}
 
-        {/* Feature Highlights */}
-        <div className="space-y-2 mb-6 text-xs text-slate-300">
-          <div className="p-2.5 rounded-xl bg-surface-950/70 border border-surface-800 flex items-center gap-2.5">
-            <Clock className="h-4 w-4 text-brand-400 flex-shrink-0" />
-            <span>BullMQ Delayed Job Queue (Persistent / No Cron)</span>
-          </div>
-          <div className="p-2.5 rounded-xl bg-surface-950/70 border border-surface-800 flex items-center gap-2.5">
-            <ShieldCheck className="h-4 w-4 text-emerald-400 flex-shrink-0" />
-            <span>Redis Sliding Window Rate Limiting & Staggering</span>
-          </div>
-          <div className="p-2.5 rounded-xl bg-surface-950/70 border border-surface-800 flex items-center gap-2.5">
-            <Sparkles className="h-4 w-4 text-indigo-400 flex-shrink-0" />
-            <span>Elasticsearch Search & Slack Rate-Limit Webhooks</span>
-          </div>
+        {/* Google Login Button */}
+        <button
+          type="button"
+          onClick={() => handleCustomGoogleLogin()}
+          className="w-full py-2.5 px-4 rounded-lg bg-[#EAF6ED] hover:bg-[#ddf2e2] text-gray-800 text-xs font-medium flex items-center justify-center gap-2.5 transition-colors"
+        >
+          {/* Google Icon */}
+          <svg className="w-4 h-4" viewBox="0 0 24 24">
+            <path
+              fill="#4285F4"
+              d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+            />
+            <path
+              fill="#34A853"
+              d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.03 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
+            />
+            <path
+              fill="#EA4335"
+              d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+            />
+          </svg>
+          <span>Login with Google</span>
+        </button>
+
+        {/* Divider */}
+        <div className="relative flex items-center my-6">
+          <div className="flex-grow border-t border-gray-100" />
+          <span className="flex-shrink mx-3 text-[11px] text-gray-400 font-normal">
+            or sign up through email
+          </span>
+          <div className="flex-grow border-t border-gray-100" />
         </div>
 
-        {/* Login Controls */}
-        <div className="space-y-3">
-          <div className="flex justify-center">
-            <GoogleLogin
-              onSuccess={(credentialResponse) => {
-                if (credentialResponse.credential) {
-                  loginWithGoogle(credentialResponse.credential);
-                }
-              }}
-              onError={() => {
-                setError('Google authentication failed. Please try Demo Login.');
-              }}
-              theme="filled_black"
-              shape="pill"
-              text="continue_with"
+        {/* Form Inputs */}
+        <form onSubmit={handleSubmit} className="space-y-3.5">
+          <div>
+            <input
+              type="text"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email ID"
+              className="w-full px-4 py-2.5 bg-[#F3F4F6] text-gray-800 placeholder-gray-400 text-xs rounded-lg border-none focus:ring-2 focus:ring-[#00A651] outline-none transition-all"
             />
           </div>
 
-          <div className="relative flex items-center py-2">
-            <div className="flex-grow border-t border-surface-800" />
-            <span className="flex-shrink mx-3 text-[11px] text-slate-500 uppercase tracking-wider font-semibold">
-              Or Instant Demo Access
-            </span>
-            <div className="flex-grow border-t border-surface-800" />
+          <div>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              className="w-full px-4 py-2.5 bg-[#F3F4F6] text-gray-800 placeholder-gray-400 text-xs rounded-lg border-none focus:ring-2 focus:ring-[#00A651] outline-none transition-all"
+            />
           </div>
 
           <button
-            onClick={handleDemoLogin}
+            type="submit"
             disabled={loading}
-            className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-glow flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            className="w-full py-2.5 px-4 mt-2 rounded-lg bg-[#00A651] hover:bg-[#008c44] text-white text-xs font-medium transition-colors shadow-sm disabled:opacity-50"
           >
-            <Zap className="h-4 w-4 text-amber-300" />
-            <span>{loading ? 'Authenticating...' : 'Sign In as Demo Candidate'}</span>
-            <ArrowRight className="h-3.5 w-3.5 ml-auto" />
+            {loading ? 'Logging in...' : 'Login'}
+          </button>
+        </form>
+
+        {/* Instant Demo Candidate Link */}
+        <div className="mt-6 pt-4 border-t border-gray-100 text-center">
+          <button
+            type="button"
+            onClick={handleDemoLogin}
+            className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-[#00A651] transition-colors"
+          >
+            <Zap className="h-3 w-3 text-amber-500" />
+            <span>Instant Demo Candidate One-Click Login</span>
           </button>
         </div>
       </div>

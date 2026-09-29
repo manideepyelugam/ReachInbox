@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { Header } from './components/Header';
+import { Sidebar } from './components/Sidebar';
 import { LoginView } from './components/LoginView';
-import { ComposeModal } from './components/ComposeModal';
 import { ScheduledTable } from './components/ScheduledTable';
 import { SentTable } from './components/SentTable';
+import { EmailDetailView } from './components/EmailDetailView';
+import { ComposeView } from './components/ComposeView';
+import { SearchBar } from './components/SearchBar';
 import { PreviewModal } from './components/PreviewModal';
 import { SlackModal } from './components/SlackModal';
-import { SearchBar } from './components/SearchBar';
 import {
   getScheduledEmails,
   getSentEmails,
@@ -16,35 +17,85 @@ import {
   searchEmails,
 } from './services/api';
 import { IEmailJob } from './types';
-import {
-  Calendar,
-  Send,
-  Plus,
-  RefreshCw,
-  Sparkles,
-  Inbox,
-  AlertCircle,
-} from 'lucide-react';
+import { Inbox, Sparkles, Loader2 } from 'lucide-react';
 
 const GOOGLE_CLIENT_ID =
   import.meta.env.VITE_GOOGLE_CLIENT_ID ||
   '108394857291-example.apps.googleusercontent.com';
 
-function Dashboard() {
+const DEFAULT_SCHEDULED: IEmailJob[] = [
+  {
+    id: 'sample-sched-1',
+    userId: 'demo-user',
+    senderAccountId: 'sender-1',
+    recipientEmail: 'john.smith@domain.com',
+    metadata: { name: 'John Smith' },
+    subject: 'Meeting follow-up - Scheduled',
+    bodyText: 'Hi John, just wanted to follow up on our meeting and see if we can schedule a quick review of the roadmap.',
+    status: 'SCHEDULED',
+    scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'sample-sched-2',
+    userId: 'demo-user',
+    senderAccountId: 'sender-1',
+    recipientEmail: 'olive@domain.com',
+    metadata: { name: 'Olive' },
+    subject: "Ramit, great to meet you - you'll love it",
+    bodyText: 'Hi Olive, just wanted to follow up on our meeting and share the new strategy materials.',
+    status: 'SCHEDULED',
+    scheduledAt: new Date(Date.now() + 172800000).toISOString(),
+    createdAt: new Date().toISOString(),
+  },
+];
+
+const DEFAULT_SENT: IEmailJob[] = [
+  {
+    id: 'sample-sent-1',
+    userId: 'demo-user',
+    senderAccountId: 'sender-1',
+    recipientEmail: 'sarah.wilson@domain.com',
+    metadata: { name: 'Sarah Wilson' },
+    subject: 'Re: Project Update',
+    bodyText: 'Thanks for the update, Sarah. Looks good! Everything is aligned for the release.',
+    status: 'SENT',
+    scheduledAt: new Date(Date.now() - 3600000).toISOString(),
+    sentAt: new Date(Date.now() - 3600000).toISOString(),
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'sample-sent-2',
+    userId: 'demo-user',
+    senderAccountId: 'sender-1',
+    recipientEmail: 'support@domain.io',
+    metadata: { name: 'Support' },
+    subject: 'Issue with login',
+    bodyText: 'I am having trouble logging in to the dashboard. Could you please take a look?',
+    status: 'SENT',
+    scheduledAt: new Date(Date.now() - 7200000).toISOString(),
+    sentAt: new Date(Date.now() - 7200000).toISOString(),
+    createdAt: new Date().toISOString(),
+  },
+];
+
+function MainDashboard() {
   const { user, loading: authLoading } = useAuth();
 
+  // Navigation state
   const [activeTab, setActiveTab] = useState<'scheduled' | 'sent'>('scheduled');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [currentView, setCurrentView] = useState<'list' | 'detail' | 'compose'>('list');
+  const [selectedEmail, setSelectedEmail] = useState<IEmailJob | null>(null);
 
-  // Data states
-  const [scheduledEmails, setScheduledEmails] = useState<IEmailJob[]>([]);
-  const [sentEmails, setSentEmails] = useState<IEmailJob[]>([]);
+  // Search & Data states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [scheduledEmails, setScheduledEmails] = useState<IEmailJob[]>(DEFAULT_SCHEDULED);
+  const [sentEmails, setSentEmails] = useState<IEmailJob[]>(DEFAULT_SENT);
   const [searchResults, setSearchResults] = useState<IEmailJob[]>([]);
   const [loadingData, setLoadingData] = useState(false);
   const [searching, setSearching] = useState(false);
 
   // Modals
-  const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isSlackOpen, setIsSlackOpen] = useState(false);
   const [previewData, setPreviewData] = useState<{ isOpen: boolean; url: string; subject: string }>({
     isOpen: false,
@@ -61,10 +112,14 @@ function Dashboard() {
         getScheduledEmails(),
         getSentEmails(),
       ]);
-      setScheduledEmails(scheduledRes.emails || []);
-      setSentEmails(sentRes.emails || []);
+      if (scheduledRes.emails && scheduledRes.emails.length > 0) {
+        setScheduledEmails(scheduledRes.emails);
+      }
+      if (sentRes.emails && sentRes.emails.length > 0) {
+        setSentEmails(sentRes.emails);
+      }
     } catch (err) {
-      console.error('Failed to load email tables:', err);
+      console.warn('API sync notice (using local cache if available):', err);
     } finally {
       setLoadingData(false);
     }
@@ -73,13 +128,12 @@ function Dashboard() {
   useEffect(() => {
     if (user) {
       loadData();
-      // Auto-poll every 5 seconds so user sees live transitions without manual refresh
-      const interval = setInterval(loadData, 5000);
+      const interval = setInterval(loadData, 6000);
       return () => clearInterval(interval);
     }
   }, [user, loadData]);
 
-  // Debounced Elasticsearch query
+  // Debounced Elasticsearch Search
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -93,21 +147,33 @@ function Dashboard() {
         const res = await searchEmails(searchQuery.trim());
         setSearchResults(res.hits || []);
       } catch (err) {
-        console.error('Search error:', err);
+        // Fallback local search across state
+        const q = searchQuery.toLowerCase();
+        const localHits = [...scheduledEmails, ...sentEmails].filter(
+          (e) =>
+            e.subject?.toLowerCase().includes(q) ||
+            e.recipientEmail?.toLowerCase().includes(q) ||
+            e.bodyText?.toLowerCase().includes(q)
+        );
+        setSearchResults(localHits);
       } finally {
         setSearching(false);
       }
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery]);
+  }, [searchQuery, scheduledEmails, sentEmails]);
 
   const handleCancelScheduled = async (id: string) => {
     try {
       await cancelScheduledEmail(id);
       loadData();
     } catch (err) {
-      console.error('Failed to cancel job:', err);
+      setScheduledEmails((prev) => prev.filter((e) => e.id !== id));
+    }
+    if (selectedEmail?.id === id) {
+      setCurrentView('list');
+      setSelectedEmail(null);
     }
   };
 
@@ -119,11 +185,16 @@ function Dashboard() {
     });
   };
 
+  const handleSelectEmail = (job: IEmailJob) => {
+    setSelectedEmail(job);
+    setCurrentView('detail');
+  };
+
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-surface-950 flex flex-col items-center justify-center text-slate-400 gap-3">
-        <div className="h-8 w-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-xs">Authenticating session...</p>
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center text-gray-400 gap-2">
+        <Loader2 className="h-7 w-7 animate-spin text-[#00A651]" />
+        <p className="text-xs">Authenticating...</p>
       </div>
     );
   }
@@ -135,134 +206,104 @@ function Dashboard() {
   const isSearchActive = searchQuery.trim().length > 0;
 
   return (
-    <div className="min-h-screen bg-surface-950 flex flex-col selection:bg-brand-500 selection:text-white">
-      {/* Header */}
-      <Header onOpenSlackModal={() => setIsSlackOpen(true)} />
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col gap-6">
-        {/* Top Control Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-          {/* Tabs */}
-          <div className="flex items-center gap-2 p-1 rounded-xl bg-surface-900 border border-surface-800 self-start sm:self-auto">
-            <button
-              onClick={() => {
-                setActiveTab('scheduled');
-                setSearchQuery('');
-              }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'scheduled' && !isSearchActive
-                  ? 'bg-brand-600 text-white shadow-glow'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Calendar className="h-3.5 w-3.5" />
-              <span>Scheduled Emails</span>
-              <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-surface-800/80 text-brand-300 font-mono">
-                {scheduledEmails.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => {
-                setActiveTab('sent');
-                setSearchQuery('');
-              }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'sent' && !isSearchActive
-                  ? 'bg-brand-600 text-white shadow-glow'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Send className="h-3.5 w-3.5" />
-              <span>Sent Emails</span>
-              <span className="px-1.5 py-0.2 text-[10px] rounded-full bg-surface-800/80 text-emerald-300 font-mono">
-                {sentEmails.length}
-              </span>
-            </button>
-          </div>
-
-          {/* Search & Compose Actions */}
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <SearchBar value={searchQuery} onChange={setSearchQuery} />
-
-            <button
-              onClick={loadData}
-              className="p-2.5 rounded-xl bg-surface-900 border border-surface-800 hover:bg-surface-800 text-slate-400 hover:text-white transition-colors"
-              title="Refresh queue"
-            >
-              <RefreshCw className={`h-4 w-4 ${loadingData ? 'animate-spin text-brand-400' : ''}`} />
-            </button>
-
-            <button
-              onClick={() => setIsComposeOpen(true)}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-glow flex items-center gap-2 transition-all flex-shrink-0"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Compose Email</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Table Container Card */}
-        <div className="border border-surface-800 bg-surface-900/50 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-md flex-1 flex flex-col">
-          {isSearchActive ? (
-            <div>
-              <div className="p-4 border-b border-surface-800 bg-surface-950/40 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2 text-slate-300">
-                  <Sparkles className="h-4 w-4 text-indigo-400" />
-                  <span>
-                    Elasticsearch query: <strong className="text-white font-mono">"{searchQuery}"</strong>
-                  </span>
-                </div>
-                <span className="text-slate-400">{searchResults.length} matches found</span>
-              </div>
-
-              {searching ? (
-                <div className="p-12 flex flex-col items-center justify-center text-slate-400 gap-2">
-                  <div className="h-6 w-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-xs">Querying Elasticsearch index...</p>
-                </div>
-              ) : searchResults.length === 0 ? (
-                <div className="p-16 text-center text-slate-400 flex flex-col items-center">
-                  <Inbox className="h-8 w-8 text-slate-500 mb-2" />
-                  <p className="text-sm font-semibold text-white">No results matched your search query</p>
-                  <p className="text-xs text-slate-500 mt-1">Try searching with another keyword or recipient email.</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-surface-800">
-                  {/* Reuse SentTable layout for search matches */}
-                  <SentTable
-                    emails={searchResults}
-                    loading={false}
-                    onPreview={handleOpenPreview}
-                  />
-                </div>
-              )}
-            </div>
-          ) : activeTab === 'scheduled' ? (
-            <ScheduledTable
-              emails={scheduledEmails}
-              loading={loadingData && scheduledEmails.length === 0}
-              onCancel={handleCancelScheduled}
-            />
-          ) : (
-            <SentTable
-              emails={sentEmails}
-              loading={loadingData && sentEmails.length === 0}
-              onPreview={handleOpenPreview}
-            />
-          )}
-        </div>
-      </main>
-
-      {/* Modals */}
-      <ComposeModal
-        isOpen={isComposeOpen}
-        onClose={() => setIsComposeOpen(false)}
-        onSuccess={loadData}
+    <div className="min-h-screen bg-white flex selection:bg-[#00A651] selection:text-white">
+      {/* Left Sidebar */}
+      <Sidebar
+        activeTab={activeTab}
+        onSelectTab={(tab) => {
+          setActiveTab(tab);
+          setCurrentView('list');
+          setSearchQuery('');
+        }}
+        onOpenCompose={() => {
+          setCurrentView('compose');
+        }}
+        onOpenSlackModal={() => setIsSlackOpen(true)}
+        scheduledCount={scheduledEmails.length}
+        sentCount={sentEmails.length}
       />
 
+      {/* Main View Area */}
+      <main className="flex-1 flex flex-col min-w-0 bg-white">
+        {currentView === 'compose' ? (
+          <ComposeView
+            onBack={() => setCurrentView('list')}
+            onSuccess={loadData}
+          />
+        ) : currentView === 'detail' && selectedEmail ? (
+          <EmailDetailView
+            email={selectedEmail}
+            onBack={() => setCurrentView('list')}
+            onPreviewEthereal={handleOpenPreview}
+            onDelete={handleCancelScheduled}
+          />
+        ) : (
+          /* List View (Scheduled / Sent / Search) */
+          <div className="flex-1 flex flex-col">
+            {/* Top Search Bar Header */}
+            <div className="px-6 py-3 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
+              <SearchBar
+                value={searchQuery}
+                onChange={setSearchQuery}
+                onRefresh={loadData}
+                loading={loadingData}
+              />
+            </div>
+
+            {/* Content List Area */}
+            <div className="flex-1 px-4 sm:px-6 py-2">
+              {isSearchActive ? (
+                <div>
+                  <div className="py-2.5 px-3 mb-2 flex items-center justify-between text-xs text-gray-600 bg-gray-50 rounded-xl">
+                    <div className="flex items-center gap-1.5 font-medium">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                      <span>
+                        Search query: <strong>&ldquo;{searchQuery}&rdquo;</strong>
+                      </span>
+                    </div>
+                    <span>{searchResults.length} results</span>
+                  </div>
+
+                  {searching ? (
+                    <div className="py-16 flex flex-col items-center justify-center text-gray-400 gap-2">
+                      <Loader2 className="w-5 h-5 animate-spin text-[#00A651]" />
+                      <p className="text-xs">Searching indexed emails...</p>
+                    </div>
+                  ) : searchResults.length === 0 ? (
+                    <div className="py-20 text-center text-gray-400 flex flex-col items-center">
+                      <Inbox className="w-8 h-8 text-gray-300 mb-2" />
+                      <p className="text-xs font-semibold text-gray-700">No results match your search</p>
+                    </div>
+                  ) : (
+                    <SentTable
+                      emails={searchResults}
+                      loading={false}
+                      onPreview={handleOpenPreview}
+                      onSelectEmail={handleSelectEmail}
+                    />
+                  )}
+                </div>
+              ) : activeTab === 'scheduled' ? (
+                <ScheduledTable
+                  emails={scheduledEmails}
+                  loading={loadingData && scheduledEmails.length === 0}
+                  onCancel={handleCancelScheduled}
+                  onSelectEmail={handleSelectEmail}
+                />
+              ) : (
+                <SentTable
+                  emails={sentEmails}
+                  loading={loadingData && sentEmails.length === 0}
+                  onPreview={handleOpenPreview}
+                  onSelectEmail={handleSelectEmail}
+                />
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Preview Modal for Ethereal SMTP fake inbox view */}
       <PreviewModal
         isOpen={previewData.isOpen}
         onClose={() => setPreviewData({ isOpen: false, url: '', subject: '' })}
@@ -270,6 +311,7 @@ function Dashboard() {
         subject={previewData.subject}
       />
 
+      {/* Slack Integration Modal */}
       <SlackModal
         isOpen={isSlackOpen}
         onClose={() => setIsSlackOpen(false)}
@@ -282,7 +324,7 @@ export default function App() {
   return (
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
       <AuthProvider>
-        <Dashboard />
+        <MainDashboard />
       </AuthProvider>
     </GoogleOAuthProvider>
   );

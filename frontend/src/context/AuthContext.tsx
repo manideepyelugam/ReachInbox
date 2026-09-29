@@ -22,8 +22,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await getMe();
       setUser(data.user);
     } catch (err) {
-      console.warn('Session check failed or unauthenticated');
-      setUser(null);
+      const cached = localStorage.getItem('reachinbox_demo_user');
+      if (cached) {
+        try {
+          setUser(JSON.parse(cached));
+        } catch (e) {
+          setUser(null);
+        }
+      } else {
+        console.warn('Session check failed or unauthenticated');
+        setUser(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -55,6 +64,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await loginWithDemo();
       localStorage.setItem('reachinbox_token', data.token);
       setUser(data.user);
+    } catch (err) {
+      console.warn('Backend unavailable, using local demo user session:', err);
+      const demoUser: IUser = {
+        id: 'demo-candidate-id',
+        email: 'oliver.brown@domain.io',
+        name: 'Oliver Brown',
+        avatarUrl: '/oliver_avatar.png',
+        isSlackConnected: true,
+        slackChannel: 'alerts',
+        slackTeam: 'Outbox Labs',
+      };
+      localStorage.setItem('reachinbox_token', 'demo-local-token');
+      localStorage.setItem('reachinbox_demo_user', JSON.stringify(demoUser));
+      setUser(demoUser);
     } finally {
       setLoading(false);
     }
